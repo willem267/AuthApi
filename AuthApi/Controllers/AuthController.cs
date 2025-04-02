@@ -1,8 +1,13 @@
 ﻿using AuthApi.DTO.Login;
+using AuthApi.DTO.Token;
 using AuthApi.Repositories.IRepositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 namespace AuthApi.Controllers
 {
@@ -12,10 +17,12 @@ namespace AuthApi.Controllers
     {
         private readonly IJwtRepository _jwtRepository;
         private readonly IUserRepository _userRepository;
-        public AuthController(IJwtRepository jwtRepository, IUserRepository userRepository)
+        private readonly IConfiguration _configuration; 
+        public AuthController(IJwtRepository jwtRepository, IUserRepository userRepository, IConfiguration configuration)
         {
             _jwtRepository = jwtRepository;
             _userRepository = userRepository;
+            _configuration = configuration;
         }
 
         //LOGIN
@@ -43,7 +50,7 @@ namespace AuthApi.Controllers
                         Secure = true,    
                         SameSite = SameSiteMode.None,
                         //Domain = "localhost",
-                        Expires = DateTime.Now.AddMinutes(30)
+                        Expires = DateTime.Now.AddMinutes(60)
                     };
                     Response.Cookies.Append("jwt", accessToken, cookieOptions);
                     return Ok(response);    
@@ -67,6 +74,44 @@ namespace AuthApi.Controllers
 
             return Unauthorized(new { message = "User not logged in" });
         }
+
+        //VALIDATE TOKEN 
+        //POST: /api/Auth/validate
+        [HttpPost("validate")]
+        public IActionResult ValidateToken([FromBody] TokenRequestDto request)
+        {
+            if (string.IsNullOrEmpty(request.Token))
+            {
+                return BadRequest(new { message = "Token is required" });
+            }
+            Console.WriteLine(request.Token);
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]);
+            try
+            {
+                var principal = tokenHandler.ValidateToken(request.Token, new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    ValidateIssuer = false,
+                    ValidateAudience = false,
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.Zero
+                }, out SecurityToken validatedToken);
+
+                var jwtToken = (JwtSecurityToken)validatedToken;
+                var username = jwtToken.Claims.First(x => x.Type == ClaimTypes.Name).Value;
+                var role = jwtToken.Claims.First(x => x.Type == ClaimTypes.Role).Value;
+
+                return Ok(new { username, role });
+            }
+            catch
+            {
+                return Unauthorized(new { message = "Invalid token" });
+            }
+        }
+
+
 
     }
 }
